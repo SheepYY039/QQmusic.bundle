@@ -1,15 +1,21 @@
 # coding=utf-8
 # Rewrite (use JSON API, other matching tweaks) by Timmy
+import base64
+import hashlib
 import io
-import time
-import os
 import json
-import requests
+import os
+import plistlib
+import re
+import string
+import time
+import unicodedata
 import urllib
-import os, string, hashlib, base64, re, plistlib, unicodedata
-import config
 from collections import defaultdict
 from io import open
+
+import config
+import requests
 
 ARTIST_SEARCH_URL_QQ_OLD = 'https://c.y.qq.com/soso/fcgi-bin/client_search_cp?format=json&t=9&w='
 ARTIST_SEARCH_URL_QQ = 'https://c.y.qq.com/splcloud/fcgi-bin/smartbox_new.fcg?_=1667523427640&key='
@@ -101,100 +107,100 @@ def ArtistGetSimilar(artist, lang='en'):
 
 
 # Change pinyin
-def multi_get_letter(str_input): 
-  if isinstance(str_input, unicode): 
-    unicode_str = str_input 
-  else: 
-    try: 
-      unicode_str = str_input.decode('utf8') 
-    except: 
-      try: 
-        unicode_str = str_input.decode('gbk') 
-      except: 
+def multi_get_letter(str_input):
+  if isinstance(str_input, unicode):
+    unicode_str = str_input
+  else:
+    try:
+      unicode_str = str_input.decode('utf8')
+    except:
+      try:
+        unicode_str = str_input.decode('gbk')
+      except:
         print 'unknown coding'
         return
-  return_list = [] 
-  #for one_unicode in unicode_str: 
-   # return_list.append(single_get_first(one_unicode)) 
+  return_list = []
+  #for one_unicode in unicode_str:
+   # return_list.append(single_get_first(one_unicode))
   #return return_list
   return single_get_first(unicode_str)
 
-def single_get_first(unicode1): 
-  str1 = unicode1.encode('gbk') 
-  try:     
-    ord(str1) 
-    return str1 
-  except: 
+def single_get_first(unicode1):
+  str1 = unicode1.encode('gbk')
+  try:
+    ord(str1)
+    return str1
+  except:
     asc = ord(str1[0]) * 256 + ord(str1[1]) - 65536
-    if asc >= -20319 and asc <= -20284: 
+    if asc >= -20319 and asc <= -20284:
       return 'a'
-    if asc >= -20283 and asc <= -19776: 
+    if asc >= -20283 and asc <= -19776:
       return 'b'
-    if asc >= -19775 and asc <= -19219: 
+    if asc >= -19775 and asc <= -19219:
       return 'c'
-    if asc >= -19218 and asc <= -18711: 
+    if asc >= -19218 and asc <= -18711:
       return 'd'
-    if asc >= -18710 and asc <= -18527: 
+    if asc >= -18710 and asc <= -18527:
       return 'e'
-    if asc >= -18526 and asc <= -18240: 
+    if asc >= -18526 and asc <= -18240:
       return 'f'
-    if asc >= -18239 and asc <= -17923: 
+    if asc >= -18239 and asc <= -17923:
       return 'g'
-    if asc >= -17922 and asc <= -17418: 
+    if asc >= -17922 and asc <= -17418:
       return 'h'
-    if asc >= -17417 and asc <= -16475: 
+    if asc >= -17417 and asc <= -16475:
       return 'j'
-    if asc >= -16474 and asc <= -16213: 
+    if asc >= -16474 and asc <= -16213:
       return 'k'
-    if asc >= -16212 and asc <= -15641: 
+    if asc >= -16212 and asc <= -15641:
       return 'l'
-    if asc >= -15640 and asc <= -15166: 
+    if asc >= -15640 and asc <= -15166:
       return 'm'
-    if asc >= -15165 and asc <= -14923: 
+    if asc >= -15165 and asc <= -14923:
       return 'n'
-    if asc >= -14922 and asc <= -14915: 
+    if asc >= -14922 and asc <= -14915:
       return 'o'
-    if asc >= -14914 and asc <= -14631: 
+    if asc >= -14914 and asc <= -14631:
       return 'p'
-    if asc >= -14630 and asc <= -14150: 
+    if asc >= -14630 and asc <= -14150:
       return 'q'
-    if asc >= -14149 and asc <= -14091: 
+    if asc >= -14149 and asc <= -14091:
       return 'r'
-    if asc >= -14090 and asc <= -13119: 
+    if asc >= -14090 and asc <= -13119:
       return 's'
-    if asc >= -13118 and asc <= -12839: 
+    if asc >= -13118 and asc <= -12839:
       return 't'
-    if asc >= -12838 and asc <= -12557: 
+    if asc >= -12838 and asc <= -12557:
       return 'w'
-    if asc >= -12556 and asc <= -11848: 
+    if asc >= -12556 and asc <= -11848:
       return 'x'
-    if asc >= -11847 and asc <= -11056: 
+    if asc >= -11847 and asc <= -11056:
       return 'y'
-    if asc >= -11055 and asc <= -10247: 
+    if asc >= -11055 and asc <= -10247:
       return 'z'
     return ''
 
-def pinyin(str_input): 
+def pinyin(str_input):
   b = ''
-  if isinstance(str_input, unicode): 
-    unicode_str = str_input 
-  else: 
-    try: 
+  if isinstance(str_input, unicode):
+    unicode_str = str_input
+  else:
+    try:
       unicode_str = str_input.decode('utf8')
-    except: 
-      try: 
+    except:
+      try:
         unicode_str = str_input.decode('gbk')
-      except: 
+      except:
         #print 'unknown coding'
-        return  
+        return
   for i in range(len(unicode_str)):
     b=b+single_get_first(unicode_str[i])
   return b.upper()
-  
+
 
 # Score lists of artist results.  Permutes artist_results list.
 def score_artists(artists, media_artist, media_albums, lang, artist_results):
-  
+
   for i, artist in enumerate(artists):
 
     # Need to coerce this into a utf-8 string so String.Quote() escapes the right characters.
@@ -225,18 +231,18 @@ def score_artists(artists, media_artist, media_albums, lang, artist_results):
       Log("专辑得分" + str(bonus))
     else:
       bonus = 0
-    
+
 
     # Adjust the score.
     score = ARTIST_INITIAL_SCORE + bonus - dist
-    Log("最终得分为: " + str(score))    
+    Log("最终得分为: " + str(score))
     name = artist['name']
 
     if score >= ARTIST_MATCH_MIN_SCORE:
       artist_results.append(MetadataSearchResult(id=id, name=name, lang=lang, score=score))
     else:
       Log('Skipping artist, didn\'t meet minimum score of ' + str(ARTIST_MATCH_MIN_SCORE))
-      
+
     # Sort the resulting artists.
     artist_results.sort(key=lambda r: r.score, reverse=True)
 
@@ -253,17 +259,17 @@ def GetArtistSimilar(artist_id):
   except:
     Log('Exception getting similar artists.')
     return []
-  
+
 
 # Get albums by artist and boost artist match score accordingly.  Returns bonus (int) of 0 - ARTIST_ALBUM_MAX_BONUS.
 def get_album_bonus(media_albums, artist_id):
-  
+
   Log('开始匹配子专辑数据')
   bonus = 0
   albums = GetAlbumsByArtist(artist_id, albums=[], limit=ARTIST_ALBUMS_LIMIT)
-  
+
   try:
-    for a in media_albums:    
+    for a in media_albums:
       media_album = a.lower()
       #Log("本地子专辑名" + media_album)
       for album in albums:
@@ -273,15 +279,15 @@ def get_album_bonus(media_albums, artist_id):
         #Log(Util.LevenshteinDistance(media_album,album['name'].lower()))
         if Util.LevenshteinDistance(media_album, album['albumName'].lower()) < NAME_DISTANCE_THRESHOLD:
           bonus += ARTIST_ALBUM_BONUS_INCREMENT
-        
+
         # This is a cheap comparison, so let's try again with the contents of parentheses removed, e.g. "(limited edition)"
         elif Util.LevenshteinDistance(media_album,RE_STRIP_PARENS.sub('',album['albumName'].lower())) < NAME_DISTANCE_THRESHOLD:
           bonus += ARTIST_ALBUM_BONUS_INCREMENT
-        
+
         # Stop trying once we hit the max bonus.
         if bonus >= ARTIST_ALBUM_MAX_BONUS:
           break
-  
+
   except Exception, e:
     Log('Error applying album bonus: ' + str(e))
   if bonus > 0:
@@ -313,7 +319,7 @@ class QQmusicAgent(Agent.Artist):
               new_ip = requests.get(ip_url,headers=hea).content
               ip = unicode(new_ip)
               file.seek(0)
-              file.truncate() 
+              file.truncate()
               file.write(unicode(str(ticks),'utf-8') + "\n")
               file.write(ip)
         proxy = {'http':ip,'https':ip}
@@ -324,7 +330,7 @@ class QQmusicAgent(Agent.Artist):
         Log(ex)
         proxy = {}
     # Handle a couple of edge cases where artist search will give bad results.
-    if media.artist == '[Unknown Artist]': 
+    if media.artist == '[Unknown Artist]':
       return
     if media.artist == 'Various Artists':
       results.Append(MetadataSearchResult(id = 'Various%20Artists', name= 'Various Artists', thumb = VARIOUS_ARTISTS_POSTER, lang  = lang, score = 100))
@@ -349,7 +355,7 @@ class QQmusicAgent(Agent.Artist):
 
   def update(self, metadata, media, lang):
     artist = GetArtist(metadata.id, lang)
-    
+
     # Name.
     try:
       metadata.title = artist['getSingerInfo']['Fsinger_name']
@@ -374,21 +380,23 @@ class QQmusicAgent(Agent.Artist):
           metadata.posters[aritst_pic] = Proxy.Media(HTTP.Request(aritst_pic))
     except:
         Log('Couldn\'t add artwork for artist.')
-        
+
     # Find similar artists.
     metadata.similar.clear()
     similar_artists = GetArtistSimilar(metadata.id)
     if similar_artists is not None:
       for similar in similar_artists:
         metadata.similar.add(similar['name'])
-  
+
 class QQmusicAgent(Agent.Album):
   name = 'qqmusic'
   languages = [Locale.Language.Chinese]
   accepts_from = ['com.plexapp.agents.localmedia','com.plexapp.agents.lyricfind']
- 
+
   def search(self, results, media, lang, manual):
-    global proxy 
+    Log("BEGIN SEARCH")
+    match_by_artist = True
+    global proxy
     if Prefs['ifproxy'] :
       try:
         ticks = time.time()
@@ -407,7 +415,7 @@ class QQmusicAgent(Agent.Album):
               new_ip = requests.get(ip_url,headers=hea).content
               ip = unicode(new_ip)
               file.seek(0)
-              file.truncate() 
+              file.truncate()
               file.write(unicode(str(ticks),'utf-8') + "\n")
               file.write(ip)
         proxy = {'http':ip,'https':ip}
@@ -417,11 +425,14 @@ class QQmusicAgent(Agent.Album):
         Log("获取代理错误")
         Log(ex)
         proxy = {}
-        
+
     # Handle a couple of edge cases where album search will give bad results.
     if media.parent_metadata.id is None:
-      return
+      Log("media.parent_metadata.id is NONE!!")
+      match_by_artist = False
+      # return
     if media.parent_metadata.id == '[Unknown Album]':
+      Log("media.parent_metadata.id is [Unknown Album]")
       return #eventually, we might be able to look at tracks to match the album
     Log(manual)
     # Search for album.
@@ -439,10 +450,11 @@ class QQmusicAgent(Agent.Album):
     found_good_match = False
 
     # First try matching in the list of albums by artist for single-artist albums.
-    if media.parent_metadata.id != 'Various%20Artists':
+    if media.parent_metadata.id != 'Various%20Artists' and match_by_artist:
 
       # Start with the first N albums (ideally a single API request).
-      if not manual:
+      if not manual and media.parent_metadata.id:
+        DEBUG(media.parent_matadata)
         albums = self.score_albums(media, lang, GetAlbumsByArtist(media.parent_metadata.id, albums=[]))
         Log('自动结果')
         Log(albums)
@@ -467,15 +479,18 @@ class QQmusicAgent(Agent.Album):
           found_good_match = True
         else:
           Log('No good matches found in ' + str(len(albums)) + ' albums by artist.')
+      # if not found_good_match or manual:
+      #   if manual:
+      #     Log('')
 
 
     #此区域待定
-    if not found_good_match :
+    if not found_good_match:
       Log("哈哈")
     if albums:
       Log("吼吼")
-    if not found_good_match or not albums:
-    #if  found_good_match == False:
+    # if not found_good_match or not albums:
+    if  not found_good_match:
       Log('没有匹配到合适专辑 开始搜索专辑')
       albums = self.score_albums(media, lang, SearchAlbums(media.title.lower(), ALBUM_MATCH_LIMIT), manual=manual) + albums
 
@@ -483,7 +498,7 @@ class QQmusicAgent(Agent.Album):
       if albums and albums[0]['score'] >= ALBUM_MATCH_GOOD_SCORE:
         found_good_match = True
         Log('Found a good match for album search.')
-      
+
       # If we still haven't found anything, try another match with parenthetical phrases stripped from
       # album title.  This helps where things like '(Limited Edition)' and '(disc 1)' may confuse search.
       if not albums or not found_good_match:
@@ -526,11 +541,11 @@ class QQmusicAgent(Agent.Album):
     matches = []
     for album in albums:
       try:
+        Log(str(album))
         name = album['albumName']
         Log("本地专辑名：" + media.title)
         Log("匹配专辑名：" + name)
-        #id = media.parent_metadata.id + '/' + String.Quote(album['name'].decode('utf-8').encode('utf-8')).replace(' ','+')
-        id = media.parent_metadata.id + '/' + str(album['albumMID'])
+
         #Log("歌手+专辑 id组合" + id)
         dist = Util.LevenshteinDistance(name.lower(),media.title.lower()) * ALBUM_NAME_DIST_COEFFICIENT  #专辑名称差
         Log("专辑相似差：" + str(dist))
@@ -544,29 +559,44 @@ class QQmusicAgent(Agent.Album):
         if artist_dist > ALBUM_TRACK_BONUS_MAX_ARTIST_DSIT:
           artist_dist = 1000
           Log('艺术家匹配错误 ' + album['singer_name'])
-        
+
+        #id = media.parent_metadata.id + '/' + String.Quote(album['name'].decode('utf-8').encode('utf-8')).replace(' ','+')
+        if not media.parent_metadata.id:
+          id = ' /'+str(album['albumMID'])
+        else:
+          id = media.parent_metadata.id + '/' + str(album['albumMID'])
+
         # Apply album and artist penalties and append to temp results list.
         score = ALBUM_INITIAL_SCORE - dist - artist_dist
         Log("匹配分数：" + str(score))
         res.append({'id':id, 'name':name, 'lang':lang, 'score':score})
-      
-      except:
+
+      except Exception as e:
         Log('Error scoring album.')
+        Log("exception is "+ str(e))
       try:
         name = album['name']
         Log("本地专辑名：" + media.title)
         Log("匹配专辑名：" + name)
-        # id = media.parent_metadata.id + '/' + String.Quote(album['name'].decode('utf-8').encode('utf-8')).replace(' ','+')
-        id = media.parent_metadata.id + '/' + str(album['mid'])
+
+        if not media.parent_metadata.id:
+          id = ' /'+str(album['mid'])
+        else:
+          # id = media.parent_metadata.id + '/' + String.Quote(album['name'].decode('utf-8').encode('utf-8')).replace(' ','+')
+          id = media.parent_metadata.id + '/' + str(album['mid'])
         # Log("歌手+专辑 id组合" + id)
         dist = Util.LevenshteinDistance(name.lower(), media.title.lower()) * ALBUM_NAME_DIST_COEFFICIENT  # 专辑名称差
         Log("专辑相似差：" + str(dist))
         artist_dist = 100
         # Freeform album searches will come back with wacky artists.  If they're not close, penalize heavily, skipping them.
 
+        singer = media.parent_metadata.title or album["singer"]
+
+        Log("本地艺术家：" + singer)
         Log("专辑艺术家：" + album['singer'])
-        if Util.LevenshteinDistance(album['singer'].lower(),String.Unquote(media.parent_metadata.title).lower()) < artist_dist:  # 艺术家差
-            artist_dist = Util.LevenshteinDistance(album['singer'].lower(), String.Unquote(media.parent_metadata.title).lower())
+
+        if Util.LevenshteinDistance(album['singer'].lower(),String.Unquote(singer).lower()) < artist_dist:  # 艺术家差
+            artist_dist = Util.LevenshteinDistance(album['singer'].lower(), String.Unquote(singer).lower())
         Log("艺术家差：" + str(artist_dist))
         if artist_dist > ALBUM_TRACK_BONUS_MAX_ARTIST_DSIT:
           artist_dist = 1000
@@ -577,8 +607,9 @@ class QQmusicAgent(Agent.Album):
         Log("匹配分数：" + str(score))
         res.append({'id': id, 'name': name, 'lang': lang, 'score': score})
 
-      except:
+      except Exception as e:
         Log('Error scoring album.')
+        Log("exception is "+ str(e))
 
     if res:
       res = sorted(res, key=lambda k: k['score'], reverse=True)
@@ -603,7 +634,7 @@ class QQmusicAgent(Agent.Album):
       return sorted(matches, key=lambda k: k['score'], reverse=True)
     else:
       return matches
-  
+
   # Get album info in order to compare track listings and apply bonus accordingly.  Return a bonus (int) of 0 - ALBUM_TRACK_MAX_BONUS.
   def get_track_bonus(self, media, album_id, lang):
     #tracks = GetTracks(media.parent_metadata.id,str(album_id), lang)
@@ -624,7 +655,7 @@ class QQmusicAgent(Agent.Album):
       # If the albums have the same number of tracks, boost more.
       if len(media.children) == len(tracks):
         bonus += ALBUM_NUM_TRACKS_BONUS
-      
+
       # Cap the bonus.
       if bonus >= ALBUM_TRACK_MAX_BONUS:
         bonus = ALBUM_TRACK_MAX_BONUS
@@ -635,7 +666,7 @@ class QQmusicAgent(Agent.Album):
     if bonus > 0:
       Log('Applying track bonus of: ' + str(bonus))
     return bonus
- 
+
   def update(self, metadata, media, lang):
     album = GetAlbum(metadata.id.split('/')[1], lang)
     #album_song = GetAlbumsong(metadata.id.split('/')[1], lang)
@@ -644,7 +675,7 @@ class QQmusicAgent(Agent.Album):
 
     # Title.
     metadata.title = album['name']
-    
+
     # Artwork.
     try:
       album_pic = ALBUMPIC_QQ % metadata.id.split('/')[1]
@@ -659,10 +690,10 @@ class QQmusicAgent(Agent.Album):
       #Log(Datetime.ParseDate(time.strftime("%Y-%m-%d", time.localtime(int(int(album['publishTime'])/1000)))))
       #metadata.originally_available_at = Datetime.ParseDate(time.strftime("%Y-%m-%d", time.localtime(int(int(album['publishTime'])/1000))))
       metadata.originally_available_at = Datetime.ParseDate(album['aDate'])
-      
+
     except:
       Log('Couldn\'t add release date to album.')
-      
+
     # 简介
     try:
       metadata.summary = album['desc'].replace('\n',' ')
@@ -742,7 +773,7 @@ class QQmusicAgent(Agent.Album):
             for p in os.listdir(path):
               path_files[p.lower()] = p
           #Log(path_files)
-          
+
           # Look for lyrics.
           lrc_exist = False
           file = (file_root + '.lrc')
@@ -753,7 +784,7 @@ class QQmusicAgent(Agent.Album):
             Log('Found a lyric in %s', file)
             metadata.tracks[key].lyrics[file] = Proxy.LocalFile(file, format='lrc')
             valid_keys[key].append(file)
-            lrc_exist = True 
+            lrc_exist = True
           if not lrc_exist :
             Log(track_id)
             Log("没有找到本地歌词 开始在线下载歌词:")
@@ -766,7 +797,7 @@ class QQmusicAgent(Agent.Album):
                 #tlyric = lyricinfo['tlyric']['lyric']
                 #Log(tlyric)
                 if lyric is not None :
-                    Log("开始下载LYRIC")    
+                    Log("开始下载LYRIC")
                     with open(file,'w+',encoding='utf8') as f:
                         f.write(lyric)
                         f.close()
@@ -782,12 +813,12 @@ class QQmusicAgent(Agent.Album):
                 else:
                       Log("在线下载失败")
             else:
-              Log('下载失败！没有在专辑中匹配到正确的音轨')                
-              
-              
-      #Log(valid_keys)    
+              Log('下载失败！没有在专辑中匹配到正确的音轨')
+
+
+      #Log(valid_keys)
       for k in metadata.tracks:
-        metadata.tracks[k].lyrics.validate_keys(valid_keys[k])    
+        metadata.tracks[k].lyrics.validate_keys(valid_keys[k])
       #for popular_track in most_popular_tracks.keys():
         #Log("popular_track:")
         #Log(popular_track)
@@ -809,13 +840,13 @@ class QQmusicAgent(Agent.Album):
 
 def DownlodeLyric(trackid):
   url =LYRIC_URL_QQ + str(trackid)
-  try: 
+  try:
     response = GetJSON(url,header=head)
   except:
     Log('Error retrieving lrc search results.')
-  return response 
-  
-      
+  return response
+
+
 def SearchArtists(artist, limit=10):
   artists = []
   num = 0
@@ -827,12 +858,12 @@ def SearchArtists(artist, limit=10):
   except:
     a = artist.lower()
   url = ARTIST_SEARCH_URL_QQ + String.Quote(a)
-  try: 
+  try:
     response = GetJSON(url)
     num = int(response['data']['singer']['count'])
   except:
     Log('Error retrieving artist search results.')
-    
+
   lim = min(limit,num)
   Log('搜索到的歌手数量：' + str(lim))
   for i in range(lim):
