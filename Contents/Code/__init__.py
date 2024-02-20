@@ -16,6 +16,7 @@ from io import open
 
 import config
 import requests
+from hanziconv import HanziConv
 
 ARTIST_SEARCH_URL_QQ_OLD = 'https://c.y.qq.com/soso/fcgi-bin/client_search_cp?format=json&t=9&w='
 ARTIST_SEARCH_URL_QQ = 'https://c.y.qq.com/splcloud/fcgi-bin/smartbox_new.fcg?_=1667523427640&key='
@@ -288,11 +289,29 @@ def get_album_bonus(media_albums, artist_id):
         if bonus >= ARTIST_ALBUM_MAX_BONUS:
           break
 
-  except Exception, e:
+  except Exception as e:
     Log('Error applying album bonus: ' + str(e))
   if bonus > 0:
     Log('专辑搜索匹配分: ' + str(bonus))
   return bonus
+
+
+def search_and_score_artist(artist_name, media, lang, manual):
+  # Search for artist.
+    Log('开始搜索: ' + artist_name)
+    if manual:
+      Log('Running custom search...')
+    artist_results = []
+
+    artists = SearchArtists(artist_name, ARTIST_MATCH_LIMIT)
+    media_albums = [a.title for a in media.children]
+    Log("子专辑列表")
+    Log(media_albums)
+
+    # Score the first N results.
+    score_artists(artists, artist_name, media_albums, lang, artist_results)
+
+    return artist_results
 
 
 class QQmusicAgent(Agent.Artist):
@@ -300,6 +319,7 @@ class QQmusicAgent(Agent.Artist):
   languages = [Locale.Language.Chinese]
   accepts_from = ['com.plexapp.agents.localmedia','com.plexapp.agents.lyricfind']
   def search(self, results, media, lang, manual):
+    Log("artist: "+str(media.album)+" "+ str(self))
     global proxy
     if Prefs['ifproxy'] :
       try:
@@ -336,22 +356,16 @@ class QQmusicAgent(Agent.Artist):
       results.Append(MetadataSearchResult(id = 'Various%20Artists', name= 'Various Artists', thumb = VARIOUS_ARTISTS_POSTER, lang  = lang, score = 100))
       return
 
-    # Search for artist.
-    Log('开始搜索: ' + media.artist)
-    if manual:
-      Log('Running custom search...')
-    artist_results = []
 
-    artists = SearchArtists(media.artist, ARTIST_MATCH_LIMIT)
-    media_albums = [a.title for a in media.children]
-    Log("子专辑列表")
-    Log(media_albums)
 
-    # Score the first N results.
-    score_artists(artists, media.artist, media_albums, lang, artist_results)
+    artist_results = search_and_score_artist(media.artist, media, lang, manual)
+    if len(artist_results) == 0:
+      artist_name = HanziConv.toSimplified(media.artist)
+      artist_results = search_and_score_artist(artist_name, media, lang, manual)
 
     for artist in artist_results:
       results.Append(artist)
+
 
   def update(self, metadata, media, lang):
     artist = GetArtist(metadata.id, lang)
@@ -434,6 +448,7 @@ class QQmusicAgent(Agent.Album):
     if media.parent_metadata.id == '[Unknown Album]':
       Log("media.parent_metadata.id is [Unknown Album]")
       return #eventually, we might be able to look at tracks to match the album
+
     Log(manual)
     # Search for album.
     if manual:
@@ -479,16 +494,13 @@ class QQmusicAgent(Agent.Album):
           found_good_match = True
         else:
           Log('No good matches found in ' + str(len(albums)) + ' albums by artist.')
-      # if not found_good_match or manual:
-      #   if manual:
-      #     Log('')
-
 
     #此区域待定
     if not found_good_match:
       Log("哈哈")
     if albums:
       Log("吼吼")
+
     # if not found_good_match or not albums:
     if  not found_good_match:
       Log('没有匹配到合适专辑 开始搜索专辑')
@@ -537,10 +549,18 @@ class QQmusicAgent(Agent.Album):
 
   # Score a list of albums, return a fresh list of scored matches above the ALBUM_MATCH_MIN_SCORE threshold.
   def score_albums(self, media, lang, albums, manual=False):
+    Log("SCORING ALBUMS...")
     res = []
     matches = []
     for album in albums:
+      singer = media.parent_metadata.title or album["singer"] or ""
+
+      try_method_1 = "albumName" in album
+
       try:
+        if not try_method_1:
+          raise KeyError
+        # Scoring Method 1: when there is 'albumName' param in "album"
         Log(str(album))
         name = album['albumName']
         Log("本地专辑名：" + media.title)
@@ -550,6 +570,8 @@ class QQmusicAgent(Agent.Album):
         dist = Util.LevenshteinDistance(name.lower(),media.title.lower()) * ALBUM_NAME_DIST_COEFFICIENT  #专辑名称差
         Log("专辑相似差：" + str(dist))
         artist_dist = 100
+
+
         # Freeform album searches will come back with wacky artists.  If they're not close, penalize heavily, skipping them.
         for artist in album['singers']:
           Log("专辑艺术家：" + artist['singer_name'])
@@ -573,9 +595,15 @@ class QQmusicAgent(Agent.Album):
 
       except Exception as e:
         Log('Error scoring album.')
-        Log("exception is "+ str(e))
+        # Log("exception is "+ str(e))
+
+      try_method_2 = "name" in album
+
       try:
+        if not try_method_2:
+          raise KeyError
         name = album['name']
+
         Log("本地专辑名：" + media.title)
         Log("匹配专辑名：" + name)
 
@@ -590,7 +618,6 @@ class QQmusicAgent(Agent.Album):
         artist_dist = 100
         # Freeform album searches will come back with wacky artists.  If they're not close, penalize heavily, skipping them.
 
-        singer = media.parent_metadata.title or album["singer"]
 
         Log("本地艺术家：" + singer)
         Log("专辑艺术家：" + album['singer'])
@@ -598,6 +625,7 @@ class QQmusicAgent(Agent.Album):
         if Util.LevenshteinDistance(album['singer'].lower(),String.Unquote(singer).lower()) < artist_dist:  # 艺术家差
             artist_dist = Util.LevenshteinDistance(album['singer'].lower(), String.Unquote(singer).lower())
         Log("艺术家差：" + str(artist_dist))
+
         if artist_dist > ALBUM_TRACK_BONUS_MAX_ARTIST_DSIT:
           artist_dist = 1000
           Log('艺术家匹配错误 ' + album['singer'])
@@ -609,18 +637,21 @@ class QQmusicAgent(Agent.Album):
 
       except Exception as e:
         Log('Error scoring album.')
-        Log("exception is "+ str(e))
+        # Log("exception is "+ str(e))
 
     if res:
       res = sorted(res, key=lambda k: k['score'], reverse=True)
       #Log(res)
       for i, result in enumerate(res):
+
         # Fetching albums to apply track bonus is expensive, so only do it for the top N results. 对排名前几的专辑进行歌曲验证
         if i < ALBUM_TRACK_BONUS_MATCH_LIMIT:
           Log("id="+ result['id'].split('/')[1])
           Log("验证专辑："+ result['name'])
+
           bonus = self.get_track_bonus(media, result['id'].split('/')[1], lang)
           res[i]['score'] = res[i]['score'] + bonus
+
         # Append albums that meet the minimum score, skip the rest.
         if res[i]['score'] >= ALBUM_MATCH_MIN_SCORE or manual:
           Log('Album result: ' + result['name'] + ' album bonus: ' + str(bonus) + ' score: ' + str(result['score']))
@@ -637,6 +668,7 @@ class QQmusicAgent(Agent.Album):
 
   # Get album info in order to compare track listings and apply bonus accordingly.  Return a bonus (int) of 0 - ALBUM_TRACK_MAX_BONUS.
   def get_track_bonus(self, media, album_id, lang):
+    Log("GETTING TRACK BONUS...")
     #tracks = GetTracks(media.parent_metadata.id,str(album_id), lang)
     album = GetAlbum(str(album_id), lang)
     tracks = album['list']
@@ -668,13 +700,30 @@ class QQmusicAgent(Agent.Album):
     return bonus
 
   def update(self, metadata, media, lang):
+    Log("UPDATING...")
+    # TODO: Found that albums have been matched already, try to match artist
     album = GetAlbum(metadata.id.split('/')[1], lang)
+    Log(album)
+    Log(metadata)
     #album_song = GetAlbumsong(metadata.id.split('/')[1], lang)
     if not album:
       return
 
     # Title.
     metadata.title = album['name']
+    if not metadata.original_title:
+      metadata.original_title = album['name']
+
+    # Artist
+    # TODO: add prefs to opt in
+    # if not metadata.artist:
+      # Create artist
+      # artist_metadata = GetArtist(album['singermid'])
+
+      # metadata.artist = album['singername']
+
+    if metadata.id.startswith(" /") and album['singermid']:
+      metadata.id = metadata.id.replace(" /", album['singermid'] + '/')
 
     # Artwork.
     try:
@@ -704,11 +753,13 @@ class QQmusicAgent(Agent.Album):
     except:
       Log("获取简介失败")
 
+    # Studio
     try:
       metadata.studio = album['company']
       Log(metadata.studio)
     except:
       pass
+
     # Genres.
     metadata.genres.clear()
     try:
@@ -727,40 +778,60 @@ class QQmusicAgent(Agent.Album):
     except:
       pass
     #Log(most_popular_tracks)
+
     valid_keys = defaultdict(list)
+
+
+    try:
+      Log(media.artist)
+    except:
+      Log("No media.artist")
+
     for index in media.tracks:
+      Log("Media Track: " + str(media.tracks[index]))
       key = media.tracks[index].guid or int(index)
       #valid_keys.append(key)
+
       for popular_track in most_popular_tracks.keys():
         #Log(popular_track)
         if popular_track and LevenshteinRatio(popular_track, media.tracks[index].title) > 0.95:
           t = metadata.tracks[key]
           t.rating_count = most_popular_tracks[popular_track]
           #Log(t.rating_count)
-      #Log("key:")
-      #Log(key)
-      #Log(index)
-      #Log(media.tracks[index])
-      #Log(media.tracks[index].items)
+
+      Log("key:")
+      Log(key)
+      Log(index)
+      Log(media.tracks[index]) # tracks
+      Log(media.tracks[index].items) # [track1, track2]
 
       track_id = '0'
-      metadata.tracks[key].original_title = media.parentTitle
-      #Log(media.parentTitle)
+      # metadata.tracks[key].original_title = media.parentTitle
+      Log(media.parentTitle)
       for track in album['list'] :
         #Log(track['name'])
         #Log(media.tracks[index].title)
         #Log(LevenshteinRatio(track["name"], media.tracks[index].title))
-        if track and LevenshteinRatio(track["songname"], media.tracks[index].title) > 0.9:
+        songname_ratio = LevenshteinRatio(track["songname"], media.tracks[index].title) > 0.9
+        songorig_ratio = LevenshteinRatio(track["songorig"], media.tracks[index].title) > 0.9
+        if track and (songname_ratio or songorig_ratio):
+          Log("track and ... ratio > 0.9")
           t = metadata.tracks[key]
           #t.rating_count = int(track["popularity"])
           #Log("t.rating_count:")
           #Log(t.rating_count)
           track_id = track["songmid"]
           art = []
-          for artist in track["singer"] :
+          for artist in track["singer"]:
             art.append(artist['name'])
+
           Log('/'.join(art))
-          t.original_title = '/'.join(art)
+
+          t.track_index = track["belongCD"]
+          # t.name = track[""]
+          t.artist = "/".join(art)
+          t.original_title = track["songname"]
+
       for item in media.tracks[index].items:
         for part in item.parts:
           filename = part.file
@@ -819,6 +890,7 @@ class QQmusicAgent(Agent.Album):
       #Log(valid_keys)
       for k in metadata.tracks:
         metadata.tracks[k].lyrics.validate_keys(valid_keys[k])
+
       #for popular_track in most_popular_tracks.keys():
         #Log("popular_track:")
         #Log(popular_track)
@@ -849,22 +921,55 @@ def DownlodeLyric(trackid):
 
 def SearchArtists(artist, limit=10):
   artists = []
+
   num = 0
   if not artist:
     Log('Missing artist. Skipping match')
     return artists
+
+
+  artist_id = None
+
+  if '//' in artist:
+    Log(artist)
+    artist_name = artist.split('//')[0]
+    artist_id = artist.split('//')[1]
+  else:
+    artist_name = artist
+
+  if artist_id:
+    try:
+      search_id_url = ARTIST_URL_QQ + String.Quote(artist_id)
+      response = GetJSON(search_id_url)
+      Log(response)
+      # num = int(response['data']['singer']['count'])
+      singer_info = response["getSingerInfo"]
+      by_id = {
+        "docid":singer_info["Fsinger_id"],
+        "id":singer_info["Fsinger_id"],
+        "mid":singer_info["Fsinger_mid"],
+        "name":singer_info["Fsinger_name"],
+        # "pic":"http://y.gtimg.cn/music/photo_new/T001R150x150M000001z2JmX09LLgL_5.jpg",
+        "singer": singer_info['Fsinger_name']
+      }
+      artists.append(by_id)
+      num=1
+    except:
+      Log('Error retrieving artist id search results.')
+
   try:
-    a = artist.lower().encode('utf-8')
+    a = artist_name.lower().encode('utf-8')
   except:
-    a = artist.lower()
+    a = artist_name.lower()
+
   url = ARTIST_SEARCH_URL_QQ + String.Quote(a)
   try:
     response = GetJSON(url)
-    num = int(response['data']['singer']['count'])
+    num += int(response['data']['singer']['count'])
   except:
     Log('Error retrieving artist search results.')
 
-  lim = min(limit,num)
+  lim = min(limit, num)
   Log('搜索到的歌手数量：' + str(lim))
   for i in range(lim):
     try:
@@ -939,6 +1044,7 @@ def GetAlbum(album_id, lang='en'):
   url = ALBUM_INFO_URL_QQ + album_id
   try:
     album_results = GetJSON(url)
+    # Log("album_results",album_results)
     if album_results.has_key('error'):
       Log('Error retrieving album metadata: ' + album_results['message'])
       return {}
