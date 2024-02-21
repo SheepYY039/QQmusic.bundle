@@ -1,22 +1,16 @@
 # coding=utf-8
 # Rewrite (use JSON API, other matching tweaks) by Timmy
-import base64
-import hashlib
 import io
-import json
-import os
-import plistlib
-import re
-import string
 import time
-import unicodedata
-import urllib
-from collections import defaultdict
-from io import open
-
-import config
+import os
+import json
 import requests
+import urllib
+import os, string, hashlib, base64, re, plistlib, unicodedata
+import config
+from collections import defaultdict
 from hanziconv import HanziConv
+from io import open
 
 ARTIST_SEARCH_URL_QQ_OLD = 'https://c.y.qq.com/soso/fcgi-bin/client_search_cp?format=json&t=9&w='
 ARTIST_SEARCH_URL_QQ = 'https://c.y.qq.com/splcloud/fcgi-bin/smartbox_new.fcg?_=1667523427640&key='
@@ -52,7 +46,8 @@ ARTIST_MIN_LISTENER_THRESHOLD = 250 # Minimum number of listeners for an artist 
 ARTIST_MATCH_GOOD_SCORE = 90 # Include artists with this score or higher regardless of listener count.
 ALBUM_MATCH_LIMIT = 8 # Max number of results returned from standalone album searches with no artist info (e.g. Various Artists).
 ALBUM_MATCH_MIN_SCORE = 75 # Minimum score required to add to custom search results.
-ALBUM_MATCH_GOOD_SCORE = 92 # Minimum score required to rely on only Albums by Artist and not search.
+ALBUM_MATCH_BY_ARTIST_GOOD_SCORE = 92 # Minimum score required to rely on only Albums by Artist and not search.
+ALBUM_INITIAL_MATCH_GOOD_SCORE = 98
 ALBUM_TRACK_BONUS_MATCH_LIMIT = 3 # Max number of albums to try for track bonus.  Each one incurs at most one API request per album.
 QUERY_SLEEP_TIME = 0.1 # How long to sleep before firing off each API request.
 
@@ -349,13 +344,13 @@ class QQmusicAgent(Agent.Artist):
         Log("获取代理错误")
         Log(ex)
         proxy = {}
+
     # Handle a couple of edge cases where artist search will give bad results.
     if media.artist == '[Unknown Artist]':
       return
     if media.artist == 'Various Artists':
       results.Append(MetadataSearchResult(id = 'Various%20Artists', name= 'Various Artists', thumb = VARIOUS_ARTISTS_POSTER, lang  = lang, score = 100))
       return
-
 
 
     artist_results = search_and_score_artist(media.artist, media, lang, manual)
@@ -441,7 +436,7 @@ class QQmusicAgent(Agent.Album):
         proxy = {}
 
     # Handle a couple of edge cases where album search will give bad results.
-    if media.parent_metadata.id is None:
+    if media.parent_metadata.id is None or media.parent_metadata.id == 'Various%20Artists':
       Log("media.parent_metadata.id is NONE!!")
       match_by_artist = False
       # return
@@ -464,63 +459,72 @@ class QQmusicAgent(Agent.Album):
     albums = []
     found_good_match = False
 
-    # First try matching in the list of albums by artist for single-artist albums.
-    if media.parent_metadata.id != 'Various%20Artists' and match_by_artist:
+    direct_search = []
+    search_by_artist = []
 
-      # Start with the first N albums (ideally a single API request).
-      if not manual and media.parent_metadata.id:
-        DEBUG(media.parent_matadata)
-        albums = self.score_albums(media, lang, GetAlbumsByArtist(media.parent_metadata.id, albums=[]))
-        Log('自动结果')
-        Log(albums)
-        # Check for a good match within these reults.  If we find one, set the flag to stop looking.
-        if albums and albums[0]['score'] >= ALBUM_MATCH_GOOD_SCORE:
-          found_good_match = True
-          Log('Good album match found (quick search) with score: ' + str(albums[0]['score']))
+    # if not manual:
+    direct_search = self.score_albums(media, lang, SearchAlbums(media.title.lower(), ALBUM_MATCH_LIMIT), manual=manual)
+    # NOTE: Manual: Fetch by name and check exact match
+    # Check for a good match within these reults.  If we find one, set the flag to stop looking.
+    if direct_search and direct_search[0]['score'] >= ALBUM_INITIAL_MATCH_GOOD_SCORE:
+      found_good_match = True
+      albums += direct_search
+      Log('Good album match found (quick search) with score: ' + str(albums[0]['score']))
+
+    # Start with the first N albums (ideally a single API request).
+    if (manual or not found_good_match) and match_by_artist:
+    # First try matching in the list of albums by artist for single-artist albums.
+    # NOTE: Step 1: fetch first N albums from artist
+      search_by_artist = self.score_albums(media, lang, GetAlbumsByArtist(media.parent_metadata.id, albums=[]))
+      # Check for a good match within these reults.  If we find one, set the flag to stop looking.
+      if search_by_artist and search_by_artist[0]['score'] >= ALBUM_MATCH_BY_ARTIST_GOOD_SCORE:
+        found_good_match = True
+        albums += direct_search
+        Log('Good album match found (quick search) with score: ' + str(albums[0]['score']))
+
+    if manual or not found_good_match:
+      # NOTE: cannot find target in artist's first n albums, decrease match limit for direct search
+      Log('没有匹配到合适专辑 开始搜索专辑')
+
+      # If we find a good match for the exact search, stop looking.
+      if direct_search and direct_search[0]['score'] >= ALBUM_MATCH_BY_ARTIST_GOOD_SCORE:
+        found_good_match = True
+        albums += direct_search
+        Log('Found a good match for album search.')
+
+    if not found_good_match and match_by_artist:
 
       # If we haven't found a good match yet, or we're running a custom search, get all albums by artist.  May be thousands
       # of albums and several API requests to complete this list, so we use it sparingly.
-      if not found_good_match or manual:
-        if manual:
-          Log('Custom search terms specified, fetching all albums by artist.')
-        else:
-          Log('No good matches found in first ' + str(len(albums)) + ' albums, fetching all albums by artist.')
-        albums = self.score_albums(media, lang, GetAlbumsByArtist(media.parent_metadata.id, albums=[]), manual=manual)
-        Log('手动结果')
-        #Log(albums)
-        # If we find a good match this way, set the flag to stop looking.
-        if albums and albums[0]['score'] >= ALBUM_MATCH_GOOD_SCORE:
-          Log('Good album match found with score: ' + str(albums[0]['score']))
-          found_good_match = True
-        else:
-          Log('No good matches found in ' + str(len(albums)) + ' albums by artist.')
+      if manual:
+        Log('Custom search terms specified, fetching all albums by artist.')
+      else:
+        Log('No good matches found in first ' + str(len(albums)) + ' albums, fetching all albums by artist.')
+      search_by_artist = self.score_albums(media, lang, GetAlbumsByArtist(media.parent_metadata.id, albums=[]), manual=manual)
+      Log('手动结果')
 
-    #此区域待定
-    if not found_good_match:
-      Log("哈哈")
-    if albums:
-      Log("吼吼")
-
-    # if not found_good_match or not albums:
-    if  not found_good_match:
-      Log('没有匹配到合适专辑 开始搜索专辑')
-      albums = self.score_albums(media, lang, SearchAlbums(media.title.lower(), ALBUM_MATCH_LIMIT), manual=manual) + albums
-
-      # If we find a good match for the exact search, stop looking.
-      if albums and albums[0]['score'] >= ALBUM_MATCH_GOOD_SCORE:
+      #Log(albums)
+      # If we find a good match this way, set the flag to stop looking.
+      if search_by_artist and search_by_artist[0]['score'] >= ALBUM_MATCH_BY_ARTIST_GOOD_SCORE:
+        Log('Good album match found with score: ' + str(albums[0]['score']))
         found_good_match = True
-        Log('Found a good match for album search.')
+        albums+=search_by_artist
+      else:
+        Log('No good matches found in ' + str(len(albums)) + ' albums by artist.')
 
-      # If we still haven't found anything, try another match with parenthetical phrases stripped from
-      # album title.  This helps where things like '(Limited Edition)' and '(disc 1)' may confuse search.
-      if not albums or not found_good_match:
+    if not albums or not found_good_match:
+        # NOTE: If we still haven't found anything, try another match with parenthetical phrases stripped from
+        # album title.  This helps where things like '(Limited Edition)' and '(disc 1)' may confuse search.
         stripped_title = RE_STRIP_PARENS.sub('',media.title).lower()
+        direct_search = 0
         if stripped_title != media.title.lower():
           Log('No good matches found in album search for %s, searching for %s.' % (media.title.lower(), stripped_title))
           # This time we extend the results  and re-sort so we consider the best-scoring matches from both searches.
-          albums  = self.score_albums(media, lang, SearchAlbums(stripped_title), manual=manual) + albums
-        if albums:
-          albums = sorted(albums, key=lambda k: k['score'], reverse=True)
+          direct_search  = self.score_albums(media, lang, SearchAlbums(stripped_title), manual=manual) + albums
+
+        if direct_search:
+          direct_search = sorted(albums, key=lambda k: k['score'], reverse=True)
+          albums += direct_search
 
     # Dedupe albums.
     seen = {}
@@ -612,23 +616,28 @@ class QQmusicAgent(Agent.Album):
         else:
           # id = media.parent_metadata.id + '/' + String.Quote(album['name'].decode('utf-8').encode('utf-8')).replace(' ','+')
           id = media.parent_metadata.id + '/' + str(album['mid'])
+
         # Log("歌手+专辑 id组合" + id)
         dist = Util.LevenshteinDistance(name.lower(), media.title.lower()) * ALBUM_NAME_DIST_COEFFICIENT  # 专辑名称差
         Log("专辑相似差：" + str(dist))
-        artist_dist = 100
-        # Freeform album searches will come back with wacky artists.  If they're not close, penalize heavily, skipping them.
 
 
-        Log("本地艺术家：" + singer)
-        Log("专辑艺术家：" + album['singer'])
+        artist_dist = 0
 
-        if Util.LevenshteinDistance(album['singer'].lower(),String.Unquote(singer).lower()) < artist_dist:  # 艺术家差
-            artist_dist = Util.LevenshteinDistance(album['singer'].lower(), String.Unquote(singer).lower())
-        Log("艺术家差：" + str(artist_dist))
+        if dist != 0: # if album title is not exact match, check artist name matching
+          artist_dist = 100
+          # Freeform album searches will come back with wacky artists.  If they're not close, penalize heavily, skipping them.
 
-        if artist_dist > ALBUM_TRACK_BONUS_MAX_ARTIST_DSIT:
-          artist_dist = 1000
-          Log('艺术家匹配错误 ' + album['singer'])
+          Log("本地艺术家：" + singer)
+          Log("专辑艺术家：" + album['singer'])
+
+          if Util.LevenshteinDistance(album['singer'].lower(),String.Unquote(singer).lower()) < artist_dist:  # 艺术家差
+              artist_dist = Util.LevenshteinDistance(album['singer'].lower(), String.Unquote(singer).lower())
+          Log("艺术家差：" + str(artist_dist))
+
+          if artist_dist > ALBUM_TRACK_BONUS_MAX_ARTIST_DSIT:
+            artist_dist = 1000
+            Log('艺术家匹配错误 ' + album['singer'])
 
         # Apply album and artist penalties and append to temp results list.
         score = ALBUM_INITIAL_SCORE - dist - artist_dist
@@ -931,6 +940,7 @@ def SearchArtists(artist, limit=10):
   artist_id = None
 
   if '//' in artist:
+    # allow artists query in format {artist_name}//{artist_mid}
     Log(artist)
     artist_name = artist.split('//')[0]
     artist_id = artist.split('//')[1]
@@ -1009,8 +1019,8 @@ def SearchAlbums(album, limit=10, legacy=False):
     else:
       album_results = response['data']['album']
       albums = Listify(album_results['itemlist'])
-  except:
-    Log('Error retrieving album search results.')
+  except Exception as e:
+    Log('Error retrieving album search results: '+ str(e))
 
   return albums
 
